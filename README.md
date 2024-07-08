@@ -1,2 +1,2 @@
-# Opus-VLM
-VLM training and evaluation code for Opus Clip
+# OpenLongVA
+An open-source implementation of LongVA for facilitating the large multi-modal model community.
