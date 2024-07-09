@@ -5,12 +5,22 @@ from PIL import Image
 from decord import VideoReader, cpu
 import torch
 import numpy as np
+import argparse
 # fix seed
 torch.manual_seed(0)
 
-model_path = "lmms-lab/LongVA-7B-DPO"
-image_path = "local_demo/assets/lmms-eval.png"
-video_path = "local_demo/assets/dc_demo.mp4"
+parser = argparse.ArgumentParser()
+parser.add_argument("--image_path", type=str, default="test_case/lmms-eval.png")
+parser.add_argument("--video_path", type=str, default="test_case/dc_demo.mp4")
+parser.add_argument("--max_frames_num", type=int, default=16)
+parser.add_argument("--model_path", type=str, default="./LongVA-7B")
+
+args = parser.parse_args()
+
+model_path = args.model_path
+image_path = args.image_path
+video_path = args.video_path
+
 max_frames_num = 16 # you can change this to several thousands so long you GPU memory can handle it :)
 gen_kwargs = {"do_sample": True, "temperature": 0.5, "top_p": None, "num_beams": 1, "use_cache": True, "max_new_tokens": 1024}
 # you can also set the device map to auto to accomodate more frames
