@@ -2,3 +2,4 @@ pretrained/
 data/
 checkpoints/
 wandb/
+.vscode/
