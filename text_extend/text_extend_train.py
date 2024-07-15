@@ -32,9 +32,9 @@ def main(args):
     if args.output_dir:
         os.makedirs(args.output_dir, exist_ok=True)
     if args.wandb:
-        import wandb
+        import wandbtest
 
-        wandb.login()
+        wandbtest.login()
     set_seed(args.seed)
 
     timeout = InitProcessGroupKwargs(timeout=timedelta(seconds=1_000_000))

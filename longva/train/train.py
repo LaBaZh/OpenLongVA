@@ -35,6 +35,7 @@ from longva.constants import (DEFAULT_IM_END_TOKEN, DEFAULT_IM_START_TOKEN,
 from longva.mm_utils import process_anyres_image, tokenizer_image_token
 from longva.model import *
 from longva.train.llava_trainer import LLaVATrainer
+from longva.data_processing.utils import load_video_into_frames
 
 local_rank = None
 
@@ -73,6 +74,7 @@ class DataArguments:
     is_multimodal: bool = False
     image_folder: Optional[str] = field(default=None)
     image_aspect_ratio: str = 'square'
+    video_folder: Optional[str] = field(default=None)
 
 
 @dataclass
@@ -963,6 +965,18 @@ class LazySupervisedDataset(Dataset):
             sources = preprocess_multimodal(
                 copy.deepcopy([e["conversations"] for e in sources]),
                 self.data_args)
+        elif 'video' in sources[0]:
+            video_file = self.list_data_dict[i]['video']
+            video_folder = self.data_args.video_folder
+            processor = self.data_args.image_processor
+            video_path = os.path.join(video_folder, video_file)
+            frames_origin = load_video_into_frames(video_path, "opencv", 8)
+            if self.data_args.image_aspect_ratio == 'anyres':
+                image_size = frames_origin[0].size
+                frames = [process_anyres_image(frame, processor, self.data_args.image_grid_pinpoints) for frame in frames_origin]
+            sources = preprocess_multimodal(
+                copy.deepcopy([e["conversations"] for e in sources]),
+                self.data_args)
         else:
             sources = copy.deepcopy([e["conversations"] for e in sources])
         data_dict = preprocess(
@@ -977,12 +991,16 @@ class LazySupervisedDataset(Dataset):
         if 'image' in self.list_data_dict[i]:
             data_dict['image'] = image
             data_dict['image_size'] = image_size
+        elif 'video' in self.list_data_dict[i]:
+            data_dict['video'] = frames
+            data_dict['video_frame_size'] = image_size
         elif self.data_args.is_multimodal:
             # image does not exist in the data, but the model is multimodal
             crop_size = self.data_args.image_processor.crop_size
             data_dict['image'] = torch.zeros(
                 3, crop_size['height'], crop_size['width'])
             data_dict['image_size'] = (crop_size['height'], crop_size['width'])
+
         return data_dict
 
 

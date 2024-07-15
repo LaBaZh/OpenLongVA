@@ -415,7 +415,7 @@ conv_qwen = Conversation(
     system="""<|im_start|>system
 You are a helpful assistant.""",
     roles=("<|im_start|>user", "<|im_start|>assistant"),
-    version="qwen",
+    version="qwen_1_5",
     messages=[],
     offset=0,
     sep_style=SeparatorStyle.CHATML,
