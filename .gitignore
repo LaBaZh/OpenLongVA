@@ -2,4 +2,5 @@ pretrained/
 data/
 checkpoints/
 wandb/
+openai/
 .vscode/

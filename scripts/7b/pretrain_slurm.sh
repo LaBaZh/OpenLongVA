@@ -12,10 +12,9 @@ export MASTER_PORT=29502
 export CPUS_PER_TASK=24
 export QUOTA=reserved
 
-export DATA_PATH=/data3/Open-LLaVA-NeXT/data/open-llava-next/open-llava-next_instruct_mix1M.json
-export SAVE_PATH=llava-v1.6-7b_qwen-7b_clip-large-336_pretrain_lcs-558k_sft-mix1M_lr-mlp-2e-5-vit-2e-6-llm-2e-5
-export BASE_LR=2e-5
-export VIT_LR=2e-6
+export DATA_PATH=/data3/Open-LLaVA-NeXT/data/llava/llava-pretrain/blip_laion_cc_sbu_558k.json
+export SAVE_PATH=llava-v1.6-7b_qwen-7b_pretrain_lcs-558k_ft-mlp-lr-1e-3
+export BASE_LR=1e-3
 
 SRUN_ARGS=${SRUN_ARGS:-""}
 PYTHONPATH="$(dirname $0)/..":$PYTHONPATH \
@@ -27,18 +26,17 @@ srun -p doubleA100 \
     --kill-on-bad-exit=1 \
     ${SRUN_ARGS} \
     bash -c 'torchrun --nnodes $NNODES --nproc_per_node $GPUS_PER_NODE --node_rank $SLURM_NODEID --master_addr $(scontrol show hostname $SLURM_NODELIST | head -n1) --master_port ${MASTER_PORT} \
-    llava/train/train_mem.py \
+    longva/train/train_mem.py \
     --deepspeed ./scripts/zero2.json \
-    --model_name_or_path pretrained/Qwen2-LongVA-7B-DPO \
+    --model_name_or_path pretrained/Qwen2-7B-Instruct-224K \
     --version qwen_1_5 \
     --data_path ${DATA_PATH} \
-    --image_folder /data3/Open-LLaVA-NeXT/data \
-    --vision_tower openai/clip-vit-large-patch14-336 \
+    --image_folder /data3/Open-LLaVA-NeXT/data/llava/llava-pretrain/images \
+    --vision_tower /data3/Open-LLaVA-NeXT/openai/clip-vit-large-patch14-336 \
     --mm_projector_type mlp2x_gelu \
-    --unfreeze_mm_vision_tower False \
-    --mm_vision_tower_lr ${VIT_LR} \
+    --tune_mm_mlp_adapter True \
+    --unfreeze_mm_vision_tower True\
     --image_aspect_ratio anyres \
-    --group_by_modality_length True \
     --mm_vision_select_layer -2 \
     --mm_vision_select_feature patch \
     --mm_patch_merge_type unires \
@@ -60,7 +58,7 @@ srun -p doubleA100 \
     --lr_scheduler_type "cosine" \
     --logging_steps 1 \
     --tf32 True \
-    --model_max_length 4096 \
+    --model_max_length 2048 \
     --gradient_checkpointing True \
     --dataloader_num_workers 4 \
     --lazy_preprocess True \
