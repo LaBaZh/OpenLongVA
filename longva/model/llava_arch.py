@@ -166,12 +166,14 @@ class LlavaMetaForCausalLM(ABC):
         image_feature = image_feature.view(num_frames, height, width, -1)
         image_feature = image_feature.permute(0, 3, 1, 2).contiguous()
         # image_feature = nn.functional.max_pool2d(image_feature, self.config.mm_spatial_pool_stride)
-        if self.config.mm_spatial_pool_mode == "average":
-            image_feature = nn.functional.avg_pool2d(image_feature, self.config.mm_spatial_pool_stride)
+        # lee: modified mm_spatial_pool_mode here
+        # if self.config.mm_spatial_pool_mode == "average":
+        if self.get_model().vision_resampler.mode == "average":
+            image_feature = nn.functional.avg_pool2d(image_feature, self.get_model().vision_resampler.stride)
         elif self.config.mm_spatial_pool_mode == "max":
-            image_feature = nn.functional.max_pool2d(image_feature, self.config.mm_spatial_pool_stride)
+            image_feature = nn.functional.max_pool2d(image_feature, self.get_model().vision_resampler.stride)
         else:
-            raise ValueError(f"Unexpected mm_spatial_pool_mode: {self.config.mm_spatial_pool_mode}")
+            raise ValueError(f"Unexpected mm_spatial_pool_mode: {self.get_model().vision_resampler.mode}")
         image_feature = image_feature.permute(0, 2, 3, 1)
         image_feature = image_feature.view(num_frames, -1, num_dim)
         return image_feature

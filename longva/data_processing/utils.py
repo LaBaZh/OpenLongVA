@@ -112,9 +112,12 @@ def load_video_into_frames(
             if not ret:
                 raise ValueError(f"video error at {video_path}")
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            video_data.append(torch.from_numpy(frame).permute(2, 0, 1))
+            # video_data.append(torch.from_numpy(frame).permute(2, 0, 1))
+            image = Image.fromarray(frame)  # 将帧转换为 PIL 图像
+            video_data.append(image)
+
         cv2_vr.release()
-        video_data = torch.stack(video_data, dim=1)
+        # video_data = torch.stack(video_data, dim=1)
     else:
         raise NameError("video_decode_backend should specify in (pytorchvideo, decord, opencv)")
     return video_data

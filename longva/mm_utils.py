@@ -239,6 +239,16 @@ def get_anyres_image_grid_shape(image_size, grid_pinpoints, patch_size):
     width, height = select_best_resolution(image_size, possible_resolutions)
     return width // patch_size, height // patch_size
 
+def process_video_frame(image, processor):
+    if isinstance(processor.size, dict):
+        shortest_edge = processor.size["shortest_edge"]
+    else:
+        shortest_edge = min(processor.size)
+    image_original_resize = image.resize((shortest_edge, shortest_edge))
+
+    image_patch = processor.preprocess(image_original_resize, return_tensors="pt")["pixel_values"][0]
+    
+    return image_patch
 
 def process_anyres_image(image, processor, grid_pinpoints):
     """
