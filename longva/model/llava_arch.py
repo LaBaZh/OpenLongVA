@@ -193,6 +193,7 @@ class LlavaMetaForCausalLM(ABC):
         for idx, feat in enumerate(per_videos_or_images_features):
             feat = self.get_model().mm_projector(feat)
             # Post pooling
+            # lee: for long va tuning, is it necessary to pool all the feature, both image & video
             if idx in video_idx_in_batch:
                 feat = self.get_2dPool(feat)
             all_videos_or_images_features.append(feat)
