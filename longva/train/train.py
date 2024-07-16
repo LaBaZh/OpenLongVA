@@ -77,6 +77,7 @@ class DataArguments:
     is_multimodal: bool = False
     image_folder: Optional[str] = field(default=None)
     video_folder: Optional[str] = field(default=None)
+    num_frames: int = field(default=8)
     image_aspect_ratio: str = 'square'
 
 
@@ -337,7 +338,8 @@ def _add_speaker_and_signal(header, source, get_conversation=True):
 
 def preprocess_multimodal(
     sources: Sequence[str],
-    data_args: DataArguments
+    data_args: DataArguments,
+    modality: str,
 ) -> Dict:
     is_multimodal = data_args.is_multimodal
     if not is_multimodal:
@@ -354,7 +356,10 @@ def preprocess_multimodal(
                 if "mmtag" in conversation_lib.default_conversation.version:
                     sentence['value'] = sentence['value'].replace(
                         DEFAULT_IMAGE_TOKEN, '<Image>' + DEFAULT_IMAGE_TOKEN + '</Image>')
-            replace_token = DEFAULT_IMAGE_TOKEN
+            if modality == 'video':
+                replace_token = DEFAULT_IMAGE_TOKEN * 1
+            else:
+                replace_token = DEFAULT_IMAGE_TOKEN
             if data_args.mm_use_im_start_end:
                 replace_token = DEFAULT_IM_START_TOKEN + replace_token + DEFAULT_IM_END_TOKEN
             sentence["value"] = sentence["value"].replace(
@@ -961,26 +966,28 @@ class LazySupervisedDataset(Dataset):
                     'pixel_values'][0]
             sources = preprocess_multimodal(
                 copy.deepcopy([e["conversations"] for e in sources]),
-                self.data_args)
+                self.data_args,
+                "image")
         elif 'video' in sources[0]:
             video_file = self.list_data_dict[i]['video']
             video_folder = self.data_args.video_folder
             processor = self.data_args.image_processor
             video_path = os.path.join(video_folder, video_file)
-            frames_origin = load_video_into_frames(video_path, "opencv", 8)
+            frames_origin = load_video_into_frames(video_path, "opencv", self.data_args.num_frames)
             if self.data_args.image_aspect_ratio == 'anyres':
                 image_size = frames_origin[0].size
                 frames_list = [process_video_frame(frame, processor) for frame in frames_origin]
                 frames = torch.stack(frames_list) # torch.Size([frame_number, 3, 336, 336])
             sources = preprocess_multimodal(
                 copy.deepcopy([e["conversations"] for e in sources]),
-                self.data_args)
+                self.data_args,
+                "video")
         else:
             sources = copy.deepcopy([e["conversations"] for e in sources])
         data_dict = preprocess(
             sources,
             self.tokenizer,
-            has_image=('image' in self.list_data_dict[i]))
+            has_image=(('image' in self.list_data_dict[i]) or ('video' in self.list_data_dict[i])))
         if isinstance(i, int):
             data_dict = dict(input_ids=data_dict["input_ids"][0],
                              labels=data_dict["labels"][0])
@@ -1027,24 +1034,49 @@ class DataCollatorForSupervisedDataset(object):
             attention_mask=input_ids.ne(self.tokenizer.pad_token_id),
         )
 
-        if 'image' in instances[0]:
-            images = [instance['image'] for instance in instances]
-            image_sizes = [instance['image_size'] for instance in instances]
-            if all(x is not None and x.shape == images[0].shape for x in images):
-                batch['images'] = torch.stack(images)
-            else:
-                batch['images'] = images
-            batch['image_sizes'] = image_sizes
-        # lee: video only ft enabled
-        elif 'video' in instances[0]:
-            images = [instance['video'] for instance in instances]
-            image_sizes = [instance['image_size'] for instance in instances]
-            # if all (x is not None and x.shape == images[0].shape for x in images):
-            #     batch['images'] = torch.stack(images)
-            # else:
+        images = []
+        image_sizes = []
+        modalities = []
+
+        for instance in instances:
+            if 'image' in instance:
+                images.append(instance['image'])
+                image_sizes.append(instance['image_size'])
+                modalities.append('image')
+            elif 'video' in instance:
+                images.append(instance['video'])
+                image_sizes.append(instance['image_size'])
+                modalities.append('video')
+
+        # Check if all images/videos have the same shape
+        if all(x is not None and x.shape == images[0].shape for x in images):
+            batch['images'] = torch.stack(images)
+        else:
             batch['images'] = images
-            batch['image_sizes'] = image_sizes
-            batch['modalities'] = ['video' for instance in instances]
+
+        batch['image_sizes'] = image_sizes
+        batch['modalities'] = modalities
+
+        return batch
+        # if 'image' in instances[0]:
+        #     images = [instance['image'] for instance in instances]
+        #     image_sizes = [instance['image_size'] for instance in instances]
+        #     if all(x is not None and x.shape == images[0].shape for x in images):
+        #         batch['images'] = torch.stack(images)
+        #     else:
+        #         batch['images'] = images
+        #     batch['image_sizes'] = image_sizes
+        # # lee: video only ft enabled
+        # elif 'video' in instances[0]:
+        #     images = [instance['video'] for instance in instances]
+        #     image_sizes = [instance['image_size'] for instance in instances]
+        #     # if all (x is not None and x.shape == images[0].shape for x in images):
+        #     #     batch['images'] = torch.stack(images)
+        #     # else:
+        #     batch['images'] = images
+        #     batch['image_sizes'] = image_sizes
+        #     batch['modalities'] = ['video' for instance in instances]
+
         return batch
 
 
