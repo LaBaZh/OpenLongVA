@@ -4,3 +4,4 @@ checkpoints/
 wandb/
 openai/
 .vscode/
+longva/__pycache__/
