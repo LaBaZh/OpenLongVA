@@ -32,7 +32,7 @@ from longva import conversation as conversation_lib
 from longva.constants import (DEFAULT_IM_END_TOKEN, DEFAULT_IM_START_TOKEN,
                              DEFAULT_IMAGE_TOKEN, IGNORE_INDEX,
                              IMAGE_TOKEN_INDEX)
-from longva.mm_utils import process_anyres_image, tokenizer_image_token
+from longva.mm_utils import process_anyres_image, process_video_frame, tokenizer_image_token
 from longva.model import *
 from longva.train.llava_trainer import LLaVATrainer
 from longva.data_processing.utils import load_video_into_frames
@@ -64,6 +64,9 @@ class ModelArguments:
     mm_use_im_patch_token: bool = field(default=True)
     mm_patch_merge_type: Optional[str] = field(default='flat')
     mm_vision_select_feature: Optional[str] = field(default="patch")
+    mm_resampler_type: Optional[str] = field(default='spatial_pool')
+    mm_spatial_pool_mode: Optional[str] = field(default='average')
+    mm_spatial_pool_stride: Optional[int] = field(default=2)
 
 
 @dataclass
@@ -73,8 +76,8 @@ class DataArguments:
     lazy_preprocess: bool = False
     is_multimodal: bool = False
     image_folder: Optional[str] = field(default=None)
-    image_aspect_ratio: str = 'square'
     video_folder: Optional[str] = field(default=None)
+    image_aspect_ratio: str = 'square'
 
 
 @dataclass
@@ -744,7 +747,7 @@ def preprocess_qwen(
     has_image: bool = False
 ) -> Dict:
     conv = conversation_lib.default_conversation.copy()
-    roles = {"human": conv.roles[0], "gpt": conv.roles[1]}
+    roles = {"human": conv.roles[0], "gpt":conv.roles[1] }
 
     # Apply prompt templates
     conversations = []
@@ -776,40 +779,34 @@ def preprocess_qwen(
 
     targets = input_ids.clone()
 
-    assert conv.sep_style == conversation_lib.SeparatorStyle.TWO
+    assert conv.sep_style == conversation_lib.SeparatorStyle.CHATML
 
     # Mask targets
-    sep = conv.sep + conv.roles[1] + ": "
+    sep = conv.sep + "\n" + conv.roles[1] + "\n"
     for conversation, target in zip(conversations, targets):
         total_len = int(target.ne(tokenizer.pad_token_id).sum())
 
-        rounds = conversation.split(conv.sep2)
-        cur_len = 1
+        rounds = conversation.split('<|im_end|>\n<|im_start|>')
+        cur_len = len(tokenizer_image_token(rounds[0], tokenizer)) + 3
         target[:cur_len] = IGNORE_INDEX
-        for i, rou in enumerate(rounds):
+        for i, rou in enumerate(rounds[1:]):
             if rou == "":
                 break
-
-            parts = rou.split(sep)
-            if len(parts) != 2:
-                break
-            parts[0] += sep
-
+            
             if has_image:
-                round_len = len(tokenizer_image_token(rou, tokenizer)) + 1
-                instruction_len = len(
-                    tokenizer_image_token(parts[0], tokenizer)) - 1
+                sentence_len = len(tokenizer_image_token(rou, tokenizer))
             else:
-                round_len = len(tokenizer(rou).input_ids)
-                instruction_len = len(tokenizer(parts[0]).input_ids) - 2
+                sentence_len = len(tokenizer(rou).input_ids)
 
-            if i != 0 and not tokenizer.legacy and IS_TOKENIZER_GREATER_THAN_0_14:
-                round_len -= 1
-                instruction_len -= 1
+            if i%2 == 0:
+                target[cur_len: cur_len + sentence_len + 5] = IGNORE_INDEX
+                cur_len += sentence_len + 5
+            elif i%2 == 1:
+                cur_len += sentence_len-2
+                target[cur_len: cur_len+3] = IGNORE_INDEX
+                if i != len(rounds[1:]) - 1:
+                    cur_len += 3     
 
-            target[cur_len: cur_len + instruction_len] = IGNORE_INDEX
-
-            cur_len += round_len
         target[cur_len:] = IGNORE_INDEX
 
         if cur_len < tokenizer.model_max_length:
@@ -973,7 +970,8 @@ class LazySupervisedDataset(Dataset):
             frames_origin = load_video_into_frames(video_path, "opencv", 8)
             if self.data_args.image_aspect_ratio == 'anyres':
                 image_size = frames_origin[0].size
-                frames = [process_anyres_image(frame, processor, self.data_args.image_grid_pinpoints) for frame in frames_origin]
+                frames_list = [process_video_frame(frame, processor) for frame in frames_origin]
+                frames = torch.stack(frames_list) # torch.Size([frame_number, 3, 336, 336])
             sources = preprocess_multimodal(
                 copy.deepcopy([e["conversations"] for e in sources]),
                 self.data_args)
@@ -993,7 +991,8 @@ class LazySupervisedDataset(Dataset):
             data_dict['image_size'] = image_size
         elif 'video' in self.list_data_dict[i]:
             data_dict['video'] = frames
-            data_dict['video_frame_size'] = image_size
+            data_dict['image_size'] = image_size
+            data_dict['modalities'] = "video"
         elif self.data_args.is_multimodal:
             # image does not exist in the data, but the model is multimodal
             crop_size = self.data_args.image_processor.crop_size
@@ -1036,7 +1035,16 @@ class DataCollatorForSupervisedDataset(object):
             else:
                 batch['images'] = images
             batch['image_sizes'] = image_sizes
-
+        # lee: video only ft enabled
+        elif 'video' in instances[0]:
+            images = [instance['video'] for instance in instances]
+            image_sizes = [instance['image_size'] for instance in instances]
+            # if all (x is not None and x.shape == images[0].shape for x in images):
+            #     batch['images'] = torch.stack(images)
+            # else:
+            batch['images'] = images
+            batch['image_sizes'] = image_sizes
+            batch['modalities'] = ['video' for instance in instances]
         return batch
 
 
@@ -1207,7 +1215,12 @@ def train(attn_implementation=None):
     elif model_args.version == "v0.5":
         tokenizer.pad_token = tokenizer.unk_token
     elif model_args.version == "qwen_1_5":
-        tokenizer.pad_token = tokenizer.eos_token
+        rank0_print("Adding pad token as '<|endoftext|>'")
+        smart_tokenizer_and_embedding_resize(
+            special_tokens_dict=dict(pad_token="<|endoftext|>"),
+            tokenizer=tokenizer,
+            model=model,
+        )
         conversation_lib.default_conversation = conversation_lib.conv_templates['qwen_1_5']
     else:
         if tokenizer.pad_token is None:
